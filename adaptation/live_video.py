@@ -70,6 +70,7 @@ track_dicts = [track_dict_student, track_dict_teacher]
 window_len = 20
 stud_embds = torch.zeros((window_len,student.fc.in_features))
 teach_embds = torch.zeros((window_len,teacher.classifier[1].in_features))
+embds = [stud_embds,teach_embds]
 
 stud_sms = torch.zeros((window_len,student.fc.out_features))
 teach_sms = torch.zeros((window_len,teacher.classifier[1].out_features))
@@ -91,9 +92,12 @@ teacher.classifier[1].register_forward_hook(get_emb('emb'))
 # ================================= Helper Functions =============================
 
 # initialize the capture object
-cap = cv2.VideoCapture(0)
-W = cap.get(cv2.CAP_PROP_FRAME_WIDTH) 
-H = cap.get(cv2.CAP_PROP_FRAME_HEIGHT) 
+cap = cv2.VideoCapture(0, cv2.CAP_DSHOW) # this is the magic!
+
+cap.set(cv2.CAP_PROP_FRAME_WIDTH, 320)
+cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 240)
+FRAME_W = cap.get(cv2.CAP_PROP_FRAME_WIDTH) 
+FRAME_H = cap.get(cv2.CAP_PROP_FRAME_HEIGHT)
 
 # measure FPS
 last_frame_time = 0
@@ -154,6 +158,14 @@ ax['space'].axis('off')
 names = ["shufflenet_v2_x0_5","efficientnet_b0"]
 flops = ["40","400"]
 
+for name in names:
+    ax[name].tick_params(axis='both', which='major', labelsize=6)
+    ax[name].set_title(name+" ("+flops[names.index(name)]+" MFLOPS)")
+    ax[name].set_ylabel('confidence (%)')
+    if names.index(name) == len(names)-1:
+        ax[name].set_xlabel('frame #')
+    
+
 def animate(i):
     # clear the last image
     ax['image'].clear()
@@ -166,19 +178,27 @@ def animate(i):
     # process the frame for each model
     id = 0
     for name,track_dict in zip(names,track_dicts):
+        # if name == "shufflenet_v2_x0_5":
+        #     continue
         # clear the plot
         ax[name].clear()
+        
 
         # process the frame
-        sm_score, emb = process_frame(frame,models[id])
+        if i % 10 == 0 and i > 0:
+            offset = embds[id][-1]
+        sm_score, embd = process_frame(frame,models[id])
 
         # update the stats
         if i >= window_len:
             sm_scores[id] = torch.roll(sm_scores[id],-1,0)
+            embds[id] = torch.roll(embds[id],-1,0)
             # sm_scores[id][:-1] = sm_scores[id][1:]
             sm_scores[id][-1] = sm_score
+            embds[id][-1] = embd
         else:
             sm_scores[id][i] = sm_score
+            embds[id][i] = embd
 
         # get the top5 on avg
         vals,idxs = torch.topk(sm_scores[id][-3:,:].mean(dim=0),5)
@@ -205,18 +225,17 @@ def animate(i):
             ax[name].set_xlim([0,window_len-1])
         else:
             ax[name].set_xlim([i,i+window_len-1])
-        ax[name].grid()
+        
         # ax[name].set_ylim([0,1])
-        ax[name].set_title(name+" ("+flops[id]+" MFLOPS)")
-        ax[name].set_ylabel('confidence (%)')
-        if id == len(names)-1:
-            ax[name].set_xlabel('frame #')
+        
         ax[name].legend(loc="upper left",bbox_to_anchor=(1, 1))
+        ax[name].grid()
+        # ax[name].set_yscale('log')
         id += 1
-        ax[name].set_yscale('log')
+        
     ax['image'].imshow(disp_frame)
     
 
 # run the animation
-ani = FuncAnimation(fig, animate, interval=200)
+ani = FuncAnimation(fig, animate, interval=300)
 plt.show()
