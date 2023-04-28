@@ -78,10 +78,10 @@ teach_sms = torch.zeros((window_len,teacher.classifier[1].out_features))
 sm_scores = [stud_sms,teach_sms]
 
 # setup embedding extraction
-emb = {}
+emb_d = {}
 def get_emb(name):
     def hook(model, input, output):
-        emb[name] = input[0].detach()
+        emb_d[name] = input[0].detach()
     return hook
 
 student.fc.register_forward_hook(get_emb('emb'))
@@ -94,8 +94,8 @@ teacher.classifier[1].register_forward_hook(get_emb('emb'))
 # initialize the capture object
 cap = cv2.VideoCapture(0, cv2.CAP_DSHOW) # this is the magic!
 
-cap.set(cv2.CAP_PROP_FRAME_WIDTH, 320)
-cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 240)
+cap.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
+cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
 FRAME_W = cap.get(cv2.CAP_PROP_FRAME_WIDTH) 
 FRAME_H = cap.get(cv2.CAP_PROP_FRAME_HEIGHT)
 
@@ -140,8 +140,6 @@ def process_frame(frame, model, offset=None, shared_FC=None, emb=None):
 
     if emb is not None:
         return sm_score, emb['emb']
-    else:
-        return sm_score, None
 
 
 
@@ -165,8 +163,9 @@ for name in names:
     if names.index(name) == len(names)-1:
         ax[name].set_xlabel('frame #')
     
-
+offset = torch.zeros(embds[0].shape)
 def animate(i):
+    global offset
     # clear the last image
     ax['image'].clear()
     
@@ -185,9 +184,14 @@ def animate(i):
         
 
         # process the frame
-        if i % 10 == 0 and i > 0:
-            offset = embds[id][-1]
-        sm_score, embd = process_frame(frame,models[id])
+        if i % 10 == 0: # every tenth frame, calculate the offset
+            offset = embds[1][-1] - embds[0][-1]
+        
+        if id == 0:
+            sm_score, embd = process_frame(frame,models[id],offset,shared_FC,emb_d)
+        else:
+            sm_score, embd = process_frame(frame,models[id],emb=emb_d)
+        # sm_score, embd = process_frame(frame,models[id],emb=emb_d)
 
         # update the stats
         if i >= window_len:
