@@ -158,12 +158,11 @@ flops = ["40","400"]
 
 for name in names:
     ax[name].tick_params(axis='both', which='major', labelsize=6)
-    ax[name].set_title(name+" ("+flops[names.index(name)]+" MFLOPS)")
-    ax[name].set_ylabel('confidence (%)')
+    
     if names.index(name) == len(names)-1:
         ax[name].set_xlabel('frame #')
     
-offset = torch.zeros(embds[0].shape)
+offset = torch.zeros(embds[0][0].shape)
 def animate(i):
     global offset
     # clear the last image
@@ -182,9 +181,8 @@ def animate(i):
         # clear the plot
         ax[name].clear()
         
-
         # process the frame
-        if i % 10 == 0: # every tenth frame, calculate the offset
+        if i % 60 == 0 and i > 0: # every tenth frame, calculate the offset
             offset = embds[1][-1] - embds[0][-1]
         
         if id == 0:
@@ -222,14 +220,19 @@ def animate(i):
                 # print(track_dict[k][:i+1])
                 ax[name].set_xticks(np.arange(len(track_dict[k])))
             else:
-                ax[name].plot(np.arange(window_len)+i,track_dict[k][:window_len],label=get_label(k))
-                ax[name].set_xticks(np.arange(len(track_dict[k]))+i)
+                ax[name].plot(np.arange(i-20,i),track_dict[k][:window_len],label=get_label(k))
+                ax[name].set_xticks(np.arange(i-20,i))
         
         if i < window_len:
             ax[name].set_xlim([0,window_len-1])
         else:
-            ax[name].set_xlim([i,i+window_len-1])
+            ax[name].set_xlim([i-20,i])
         
+        ax[names[0]].axvline(i-i%60,c='k')
+        ax[name].set_title(name+" ("+flops[names.index(name)]+" MFLOPS)")
+        ax[name].set_ylabel('confidence (%)')
+        if id == 1:
+            ax[name].set_xlabel('frame #')
         # ax[name].set_ylim([0,1])
         
         ax[name].legend(loc="upper left",bbox_to_anchor=(1, 1))
