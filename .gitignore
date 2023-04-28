@@ -131,3 +131,5 @@ dmypy.json
 
 *.pth
 adaptation/runs/
+
+!adaptation/best_batch_i288264sn_frozen_head_long1682578354.1065493.pth
