@@ -12,13 +12,14 @@ from PIL import Image
 import copy
 import numpy as np
 import json
+import skimage as sk
 
 class ImagenetVidRobust(Dataset):
     """ImagenetVidRObust dataset.
 
     """
 
-    def __init__(self, root_dir,transform=None,class_subset=None):
+    def __init__(self, root_dir,transform=None,pert_trans=None,class_subset=None):
         """
         Args:
             root_dir (string): directory where the imgs are
@@ -26,6 +27,7 @@ class ImagenetVidRobust(Dataset):
         """
         self.root_dir = root_dir
         self.transform = transform
+        self.pert_trans = pert_trans
 
         # load all the dataset metadata into dictionaries
 
@@ -81,12 +83,14 @@ class ImagenetVidRobust(Dataset):
         img_sequence = []
         label_sequence = []
 
-        for frame_path in self.pmsets_dict[anchor_key]:
+        for i,frame_path in enumerate(self.pmsets_dict[anchor_key]):
             img = Image.open(os.path.join(self.root_dir,frame_path))
             img = img.convert("RGB") 
 
             # apply transform
-            if self.transform:
+            if self.pert_trans and i >= len(self.pmsets_dict[anchor_key])//2:
+                img = self.pert_trans(img)
+            elif self.transform:
                 img = self.transform(img)
 
             # get the label
@@ -205,7 +209,12 @@ class ImagenetVidRobust(Dataset):
                 ax[name].legend(loc="upper left",bbox_to_anchor=(1, 1))
                 id += 1
                 ax[name].set_yscale('log')
-            ax['image'].imshow(Image.open(os.path.join(self.root_dir,self.pmsets_dict[anchor_key[0]][i])))
+            if i >= len(imgs)//2:
+                ax['image'].imshow(
+                    self.pert_trans(Image.open(os.path.join(self.root_dir,self.pmsets_dict[anchor_key[0]][i])))
+                    )
+            else:
+                ax['image'].imshow(Image.open(os.path.join(self.root_dir,self.pmsets_dict[anchor_key[0]][i])))
             
 
         # run the animation
@@ -217,6 +226,14 @@ class ImagenetVidRobust(Dataset):
 def load_imagenetvid_robust(batch_size,class_subset=None):
 
     root_dir = os.path.expanduser("~/Projects/data/imagenet_vid_ytbb_robust/imagenet-vid-robust")
+    # pert_tf = None
+    pert_tf = transforms.Compose([
+                transforms.Resize(256),
+                transforms.CenterCrop(224),
+                Brightness(4),
+                transforms.PILToTensor(),
+                transforms.ConvertImageDtype(torch.float),
+                transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])])
     val_tf = transforms.Compose([
                 transforms.Resize(256),
                 transforms.CenterCrop(224),
@@ -226,10 +243,27 @@ def load_imagenetvid_robust(batch_size,class_subset=None):
             ])
 
     # load the training dataset and make the validation split
-    val_set = ImagenetVidRobust(root_dir,val_tf,class_subset=class_subset)
+    val_set = ImagenetVidRobust(root_dir,val_tf,pert_tf,class_subset=class_subset)
     # num_train = int(0.98*len(train_set))
     # train_split, val_split = torch.utils.data.random_split(train_set, [num_train, len(train_set)-num_train],torch.Generator().manual_seed(42))
 
     val_loader = torch.utils.data.DataLoader(val_set, batch_size=batch_size, shuffle=True, pin_memory=True,num_workers=4)
 
     return val_loader
+
+
+# ================== dist shifts ================
+class Brightness(object):
+
+    def __init__(self, severity):
+        self.severity = severity
+
+    def __call__(self, x):
+        c = [.1, .2, .3, .4, .5][self.severity - 1]
+
+        x = np.array(x) / 255.
+        x = sk.color.rgb2hsv(x)
+        x[:, :, 2] = np.clip(x[:, :, 2] + c, 0, 1)
+        x = sk.color.hsv2rgb(x)
+
+        return Image.fromarray(np.uint8(np.clip(x, 0, 1) * 255))
