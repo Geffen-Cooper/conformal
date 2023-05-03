@@ -226,14 +226,14 @@ class ImagenetVidRobust(Dataset):
 def load_imagenetvid_robust(batch_size,class_subset=None):
 
     root_dir = os.path.expanduser("~/Projects/data/imagenet_vid_ytbb_robust/imagenet-vid-robust")
-    pert_tf = None
-    # pert_tf = transforms.Compose([
-    #             transforms.Resize(256),
-    #             transforms.CenterCrop(224),
-    #             Brightness(4),
-    #             transforms.PILToTensor(),
-    #             transforms.ConvertImageDtype(torch.float),
-    #             transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])])
+    # pert_tf = None
+    pert_tf = transforms.Compose([
+                transforms.Resize(256),
+                transforms.CenterCrop(224),
+                Brightness(4),
+                transforms.PILToTensor(),
+                transforms.ConvertImageDtype(torch.float),
+                transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])])
     val_tf = transforms.Compose([
                 transforms.Resize(256),
                 transforms.CenterCrop(224),
