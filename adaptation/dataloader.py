@@ -4,6 +4,7 @@ import torch.nn.functional as F
 import torch.optim as optim
 from torchvision import datasets, transforms
 import matplotlib.pyplot as plt
+from matplotlib.animation import FuncAnimation
 import pandas as pd
 from torch.utils.data import Dataset, DataLoader
 import os
@@ -57,7 +58,7 @@ class ImagenetVidRobust(Dataset):
 
         # go through the anchor dictionary, only add videos with a single class
         for key in self.pmsets_dict.keys():
-            if len(self.labels_dict[key]) == 1:
+            if len(self.labels_dict[key]) == 1 and len(self.pmsets_dict[key]) >= 5:
                 self.vid_paths.append(key)
                 self.labels.append(self.labels_dict[key][0])
 
@@ -96,7 +97,7 @@ class ImagenetVidRobust(Dataset):
             
         # return the sample (img (tensor)), object class (int)
         try:
-            return torch.stack(img_sequence), torch.tensor(label_sequence)
+            return torch.stack(img_sequence), torch.tensor(label_sequence),anchor_key
         except:
             print(f"idx:{idx}, anchor_key:{anchor_key}")
             exit()
@@ -108,38 +109,108 @@ class ImagenetVidRobust(Dataset):
         # map imagenet index to the wordnet id
         imgnet_wnid = self.imagenet_class_index_dict[str(pred_idx)][0]
         # get the parent wordnet id
-        imgnetvid_wnid = self.wnid_map_dict[imgnet_wnid]
+        try:
+            imgnetvid_wnid = self.wnid_map_dict[imgnet_wnid]
+        except:
+            # if no parent wnid try mapping to class label
+            try:
+                label = int(self.imagenet_vid_wnid_map_dict[imgnetvid_wnid][0])
+            except:
+                return pred_idx
+            return label
         # map the parent wordnet id to the label index
-        return int(self.imagenet_vid_wnid_map_dict[imgnetvid_wnid][0])
+        try:
+            label = int(self.imagenet_vid_wnid_map_dict[imgnetvid_wnid][0])
+        except:
+            return pred_idx
+        return label
+
 
     # show the first image in each sequence
-    def visualize_batch(self):
+    def visualize_vid(self,student,teacher,big_teacher,batch_idx=1):
         batch_size = 1
         data_loader = DataLoader(self,batch_size)
 
         # get the first batch
-        (imgs, labels) = next(iter(data_loader))
+        for count,(imgs, labels,anchor_key) in enumerate(data_loader):
+            if count == batch_idx:
+                break
         imgs = imgs[0]
         labels = labels[0]
         
-        # display the batch in a grid with the img, label, idx
-        rows = 8
-        cols = 8
-        
-        fig,ax_array = plt.subplots(rows,cols,figsize=(20,20))
-        fig.subplots_adjust(hspace=0.5)
-        for i in range(rows):
-            for j in range(cols):
-                idx = i*rows+j
-                if idx == len(labels):
-                    continue
-                text = self.imagenet_vid_class_index_dict[str(labels[idx].item())][1]
+        preds = []
+        track_dict_student = {}
+        track_dict_teacher = {}
+        track_dict_teacher_big = {}
+        track_dicts = [track_dict_student, track_dict_teacher, track_dict_teacher_big]
+        models = [student,teacher,big_teacher]
 
-                ax_array[i,j].imshow((imgs[idx].permute(1, 2, 0)))
+        stud_sms = torch.zeros((len(imgs),1000))
+        teach_sms = torch.zeros((len(imgs),1000))
+        big_teacher_sms = torch.zeros((len(imgs),1000))
 
-                ax_array[i,j].title.set_text(text)
-                ax_array[i,j].set_xticks([])
-                ax_array[i,j].set_yticks([])
+        sm_scores = [stud_sms,teach_sms,big_teacher_sms]
+
+        for id,track_dict in enumerate(track_dicts):
+            # get a prediction for the current video
+            with torch.no_grad():
+                sm_scores[id][:,:] = torch.nn.functional.softmax(models[id](imgs).cpu(),dim=1)[:,:]
+
+
+        # get the top five averaged over the whole video
+        for id,track_dict in enumerate(track_dicts):
+            # get the top5 on avg
+            vals,idxs = torch.topk(sm_scores[id].mean(dim=0),5)
+            # create the tracking stats
+            for j,idx in enumerate(idxs):
+                track_dict[idx.item()] = np.zeros(len(imgs))
+            # fill in the conf scores
+            for i, img in enumerate(imgs):
+                for j,idx in enumerate(track_dict.keys()):
+                    track_dict[idx][i] = sm_scores[id][i,idx]
+
+        plt.close()
+        fig,ax = plt.subplot_mosaic([['shufflenet_v2_x0_5','space','image'],
+                                    ['efficientnet_b0','space','image'],
+                                    ['resnet_50','space','image'],],figsize=(12,6),
+                                    gridspec_kw={'width_ratios':[0.5,0.1,0.5],
+                                                'height_ratios': [1,1,1]})
+        fig.tight_layout(pad=2.0)
+        ax['space'].axis('off')
+        names = ["shufflenet_v2_x0_5","efficientnet_b0","resnet_50"]
+        flops = ["40","400","4000"]
+
+        def animate(i):
+            ax['image'].clear()
+            id = 0
+            for name,track_dict in zip(names,track_dicts):
+                ax[name].clear()
+                
+                for k in track_dict.keys():
+                    imgnet_name = self.imagenet_class_index_dict[str(k)][1]
+                    idx = self.pred_idx_to_label_idx(k)
+                    try:
+                        pred_label = imgnet_name + " ("+self.imagenet_vid_class_index_dict[str(idx)][1]+")"
+                    except:
+                        pred_label = imgnet_name
+                    ax[name].plot(np.arange(i+1),track_dict[k][:i+1],label=pred_label)
+                    ax[name].set_xticks(np.arange(len(track_dict[k])))
+                ax[name].set_xlim([0,len(imgs)-1])
+                ax[name].grid()
+                # ax[name].set_ylim([0,1])
+                ax[name].set_title(name+" ("+flops[id]+" MFLOPS)")
+                ax[name].set_ylabel('confidence (%)')
+                if id == len(names)-1:
+                    ax[name].set_xlabel('frame #')
+                ax[name].legend(loc="upper left",bbox_to_anchor=(1, 1))
+                id += 1
+                ax[name].set_yscale('log')
+            ax['image'].imshow(Image.open(os.path.join(self.root_dir,self.pmsets_dict[anchor_key[0]][i])))
+            
+
+        # run the animation
+        ani = FuncAnimation(fig, animate, frames=len(imgs), interval=300, repeat=False)
+        ani.save('ani.gif')
         plt.show()
 
 
