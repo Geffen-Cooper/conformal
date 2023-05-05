@@ -13,6 +13,7 @@ import copy
 import numpy as np
 import json
 import skimage as sk
+import random
 
 class ImagenetVidRobust(Dataset):
     """ImagenetVidRObust dataset.
@@ -52,7 +53,14 @@ class ImagenetVidRobust(Dataset):
 
         # get the idx to imagenet wornet id mapping dictionary
         with open(os.path.join(root_dir,"misc","imagenet_class_index.json")) as imagenet_class_index:
-            self.imagenet_class_index_dict = json.load(imagenet_class_index) 
+            self.imagenet_class_index_dict = json.load(imagenet_class_index)
+            self.rev_imagenet_class_index_dict = {}
+            for k,v in zip(self.imagenet_class_index_dict.keys(),self.imagenet_class_index_dict.values()):
+                self.rev_imagenet_class_index_dict[v[0]] = int(k)  
+
+        # get the prediction idx to the imagenet idx dictionary
+        with open(os.path.join(root_dir,"misc","rev_wnid_map.json")) as rev_wnid_map:
+            self.rev_wnid_map_dict = json.load(rev_wnid_map) 
 
 
         self.labels = []
@@ -72,6 +80,13 @@ class ImagenetVidRobust(Dataset):
                 self.dataset_idxs.extend((label_tensor==c).nonzero().view(-1).tolist())
         else:
             self.dataset_idxs = list(range(len(self.labels)))
+
+        self.dataset_idxs = torch.tensor(self.dataset_idxs)
+
+        # shuffle
+        rand_order = torch.randperm(len(self.dataset_idxs))
+        self.dataset_idxs = self.dataset_idxs[rand_order]
+
 
 
     def __getitem__(self, idx):
@@ -128,7 +143,20 @@ class ImagenetVidRobust(Dataset):
         except:
             return pred_idx
         return label
+    
+    def label_idx_to_pred_idx(self,label_idx):
+        # map the label to the wnid
+        imgnet_parent_wnid = self.imagenet_vid_class_index_dict[str(label_idx.item())][0]
 
+        # get the imagenet_wnids
+        imgnet_wnids = self.rev_wnid_map_dict[imgnet_parent_wnid]
+
+        # get list of possible
+        possible_pred_idxs = torch.zeros(len(imgnet_wnids),dtype=int)
+        for i,id in enumerate(imgnet_wnids):
+            possible_pred_idxs[i] = int(self.rev_imagenet_class_index_dict[id])
+
+        return possible_pred_idxs
 
     # show the first image in each sequence
     def visualize_vid(self,student,teacher,big_teacher,batch_idx=1):
@@ -226,14 +254,14 @@ class ImagenetVidRobust(Dataset):
 def load_imagenetvid_robust(batch_size,class_subset=None):
 
     root_dir = os.path.expanduser("~/Projects/data/imagenet_vid_ytbb_robust/imagenet-vid-robust")
-    # pert_tf = None
-    pert_tf = transforms.Compose([
-                transforms.Resize(256),
-                transforms.CenterCrop(224),
-                Brightness(4),
-                transforms.PILToTensor(),
-                transforms.ConvertImageDtype(torch.float),
-                transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])])
+    pert_tf = None
+    # pert_tf = transforms.Compose([
+    #             transforms.Resize(256),
+    #             transforms.CenterCrop(224),
+    #             Brightness(4),
+    #             transforms.PILToTensor(),
+    #             transforms.ConvertImageDtype(torch.float),
+    #             transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])])
     val_tf = transforms.Compose([
                 transforms.Resize(256),
                 transforms.CenterCrop(224),
